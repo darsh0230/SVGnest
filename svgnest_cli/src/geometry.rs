@@ -1,5 +1,5 @@
-use crate::svg_parser::Point;
-use geo::{Area, BoundingRect, Rotate, LineString, point};
+use crate::svg_parser::{Point, Polygon};
+use geo::{Area, BoundingRect, LineString, Rotate, point};
 
 /// Bounding box of a polygon
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,6 +63,40 @@ pub fn rotate_polygon(points: &[Point], angle_deg: f64) -> Vec<Point> {
         .points()
         .map(|c| Point { x: c.x(), y: c.y() })
         .collect()
+}
+
+/// Rotate a collection of polygons by the given angle.
+pub fn rotate_polygons(polys: &[Polygon], angle_deg: f64) -> Vec<Polygon> {
+    polys
+        .iter()
+        .map(|p| Polygon {
+            id: p.id,
+            points: rotate_polygon(&p.points, angle_deg),
+            closed: p.closed,
+        })
+        .collect()
+}
+
+/// Bounding box that encompasses all provided polygons.
+pub fn get_polygons_bounds(polys: &[Polygon]) -> Option<Bounds> {
+    let mut iter = polys.iter().filter_map(|p| get_polygon_bounds(&p.points));
+    let first = iter.next()?;
+    let mut min_x = first.x;
+    let mut min_y = first.y;
+    let mut max_x = first.x + first.width;
+    let mut max_y = first.y + first.height;
+    for b in iter {
+        min_x = min_x.min(b.x);
+        min_y = min_y.min(b.y);
+        max_x = max_x.max(b.x + b.width);
+        max_y = max_y.max(b.y + b.height);
+    }
+    Some(Bounds {
+        x: min_x,
+        y: min_y,
+        width: max_x - min_x,
+        height: max_y - min_y,
+    })
 }
 
 #[cfg(test)]

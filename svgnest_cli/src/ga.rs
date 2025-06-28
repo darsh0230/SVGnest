@@ -1,7 +1,10 @@
 use rand::prelude::*;
 use rayon::prelude::*;
 
-use crate::geometry::{get_polygon_bounds, rotate_polygon, Bounds};
+use crate::geometry::{
+    Bounds, get_polygon_bounds, get_polygons_bounds, rotate_polygon, rotate_polygons,
+};
+use crate::part::Part;
 use crate::svg_parser::Polygon;
 use anyhow::{self, Result};
 
@@ -21,18 +24,14 @@ pub struct Individual {
 }
 
 pub struct GeneticAlgorithm<'a> {
-    parts: &'a [Polygon],
+    parts: &'a [Part],
     bin_bounds: Bounds,
     config: GAConfig,
     pub population: Vec<Individual>,
 }
 
 impl<'a> GeneticAlgorithm<'a> {
-    pub fn new(
-        parts: &'a [Polygon],
-        bin: &'a Polygon,
-        config: GAConfig,
-    ) -> Result<Self> {
+    pub fn new(parts: &'a [Part], bin: &'a Polygon, config: GAConfig) -> Result<Self> {
         let bin_bounds = get_polygon_bounds(&bin.points)
             .ok_or_else(|| anyhow::anyhow!("failed to compute bin bounds"))?;
         let mut ga = GeneticAlgorithm {
@@ -55,7 +54,7 @@ impl<'a> GeneticAlgorithm<'a> {
         Ok(ga)
     }
 
-    fn random_angle(&self, part: &Polygon) -> f64 {
+    fn random_angle(&self, part: &Part) -> f64 {
         if self.config.rotations == 0 {
             return 0.0;
         }
@@ -65,8 +64,8 @@ impl<'a> GeneticAlgorithm<'a> {
         let mut rng = thread_rng();
         angles.shuffle(&mut rng);
         for angle in angles {
-            let rotated = rotate_polygon(&part.points, angle);
-            if let Some(b) = get_polygon_bounds(&rotated) {
+            let rotated = rotate_polygons(&part.polygons, angle);
+            if let Some(b) = get_polygons_bounds(&rotated) {
                 if b.width <= self.bin_bounds.width && b.height <= self.bin_bounds.height {
                     return angle;
                 }
@@ -149,9 +148,7 @@ impl<'a> GeneticAlgorithm<'a> {
                 return i;
             }
             lower = upper;
-            upper += 2.0
-                * weight
-                * ((idxs.len() - pos) as f64 / idxs.len() as f64);
+            upper += 2.0 * weight * ((idxs.len() - pos) as f64 / idxs.len() as f64);
         }
         idxs[0]
     }
@@ -199,8 +196,8 @@ impl<'a> GeneticAlgorithm<'a> {
         let mut body = String::new();
         for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
             let part = &self.parts[idx];
-            let rotated = rotate_polygon(&part.points, angle);
-            let b = match get_polygon_bounds(&rotated) {
+            let rotated = part.rotated(angle);
+            let b = match get_polygons_bounds(&rotated) {
                 Some(v) => v,
                 None => continue,
             };
@@ -209,14 +206,17 @@ impl<'a> GeneticAlgorithm<'a> {
                 x = 0.0;
                 y += self.bin_bounds.height;
             }
-            let points: Vec<String> = rotated
-                .into_iter()
-                .map(|p| format!("{},{}", p.x + x, p.y + y))
-                .collect();
-            body.push_str(&format!(
-                "<polygon points=\"{}\" fill=\"none\" stroke=\"black\"/>\n",
-                points.join(" ")
-            ));
+            for poly in rotated {
+                let points: Vec<String> = poly
+                    .points
+                    .into_iter()
+                    .map(|p| format!("{},{}", p.x + x, p.y + y))
+                    .collect();
+                body.push_str(&format!(
+                    "<polygon points=\"{}\" fill=\"none\" stroke=\"black\"/>\n",
+                    points.join(" ")
+                ));
+            }
             x += b.width + self.config.spacing;
         }
         let width = self.bin_bounds.width;
@@ -228,18 +228,13 @@ impl<'a> GeneticAlgorithm<'a> {
     }
 }
 
-fn evaluate_static(
-    ind: &Individual,
-    parts: &[Polygon],
-    bin_bounds: Bounds,
-    config: GAConfig,
-) -> f64 {
+fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config: GAConfig) -> f64 {
     let mut x = 0.0;
     let mut bins = 1;
     for (&idx, &angle) in ind.placement.iter().zip(ind.rotation.iter()) {
         let part = &parts[idx];
-        let rotated = rotate_polygon(&part.points, angle);
-        let b = match get_polygon_bounds(&rotated) {
+        let rotated = rotate_polygons(&part.polygons, angle);
+        let b = match get_polygons_bounds(&rotated) {
             Some(v) => v,
             None => continue,
         };
