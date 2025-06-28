@@ -1,6 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 
+mod dxf_parser;
 mod ga;
 mod geometry;
 mod line_merge;
@@ -88,7 +89,13 @@ fn main() {
 
     let mut all_polys = Vec::new();
     for path in &cfg.inputs {
-        match svg_parser::polygons_from_file(path, cfg.merge_lines) {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let res = if ext.eq_ignore_ascii_case("dxf") {
+            dxf_parser::polygons_from_dxf(path)
+        } else {
+            svg_parser::polygons_from_file(path, cfg.merge_lines)
+        };
+        match res {
             Ok(mut p) => all_polys.append(&mut p),
             Err(e) => {
                 eprintln!("Failed to parse {}: {}", path.display(), e);
