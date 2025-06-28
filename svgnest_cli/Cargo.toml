@@ -17,6 +17,7 @@ geo-clipper = "0.9.0"
 rand = "0.8"
 rayon = "1"
 dxf = { version = "0.6", optional = true }
+svgtypes = "0.5"
 
 [features]
 default = ["dxf"]
