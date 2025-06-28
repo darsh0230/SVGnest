@@ -5,6 +5,7 @@ mod dxf_parser;
 mod ga;
 mod geometry;
 mod line_merge;
+mod part;
 mod svg_parser;
 
 /// Command line arguments for SVGnest
@@ -87,16 +88,24 @@ pub fn parse_config() -> Config {
 fn main() {
     let cfg = parse_config();
 
-    let mut all_polys = Vec::new();
+    let mut parts = Vec::new();
+    let mut bin: Option<svg_parser::Polygon> = None;
     for path in &cfg.inputs {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let res = if ext.eq_ignore_ascii_case("dxf") {
-            dxf_parser::polygons_from_dxf(path)
+            dxf_parser::part_from_dxf(path)
         } else {
             svg_parser::polygons_from_file(path, cfg.merge_lines, cfg.approx_tolerance)
+                .map(|p| crate::part::Part::new(p))
         };
         match res {
-            Ok(mut p) => all_polys.append(&mut p),
+            Ok(p) => {
+                if bin.is_none() {
+                    bin = p.polygons.first().cloned();
+                } else {
+                    parts.push(p);
+                }
+            }
             Err(e) => {
                 eprintln!("Failed to parse {}: {}", path.display(), e);
                 return;
@@ -104,19 +113,26 @@ fn main() {
         }
     }
 
-    if all_polys.is_empty() {
+    let bin = match bin {
+        Some(b) => b,
+        None => {
+            eprintln!("No polygons found in input");
+            return;
+        }
+    };
+
+    if parts.is_empty() {
         eprintln!("No polygons found in input");
         return;
     }
 
-    let bin = all_polys.remove(0);
     let ga_cfg = ga::GAConfig {
         population_size: cfg.population_size,
         mutation_rate: cfg.mutation_rate,
         rotations: cfg.rotations,
         spacing: cfg.spacing,
     };
-    let mut ga = match ga::GeneticAlgorithm::new(&all_polys, &bin, ga_cfg) {
+    let mut ga = match ga::GeneticAlgorithm::new(&parts, &bin, ga_cfg) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Failed to initialize algorithm: {}", e);
@@ -124,11 +140,11 @@ fn main() {
         }
     };
     ga.evolve(10);
-    let best = match ga
-        .population
-        .iter()
-        .min_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
-    {
+    let best = match ga.population.iter().min_by(|a, b| {
+        a.fitness
+            .partial_cmp(&b.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }) {
         Some(v) => v,
         None => {
             eprintln!("No population available to evaluate");

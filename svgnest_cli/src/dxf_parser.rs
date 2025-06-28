@@ -2,7 +2,16 @@
 use dxf::{Drawing, entities::EntityType};
 use std::path::Path;
 
-use crate::svg_parser::{Point, Polygon};
+use crate::{
+    part::Part,
+    svg_parser::{Point, Polygon},
+};
+
+const CONNECT_TOLERANCE: f64 = 1e-6;
+
+fn points_equal(a: &Point, b: &Point) -> bool {
+    (a.x - b.x).abs() < CONNECT_TOLERANCE && (a.y - b.y).abs() < CONNECT_TOLERANCE
+}
 
 #[cfg(feature = "dxf")]
 fn approximate_arc(cx: f64, cy: f64, r: f64, start: f64, end: f64, segments: usize) -> Vec<Point> {
@@ -10,7 +19,10 @@ fn approximate_arc(cx: f64, cy: f64, r: f64, start: f64, end: f64, segments: usi
     let step = (end - start) / segments as f64;
     for i in 0..=segments {
         let a = start + step * i as f64;
-        pts.push(Point { x: cx + r * a.cos(), y: cy + r * a.sin() });
+        pts.push(Point {
+            x: cx + r * a.cos(),
+            y: cy + r * a.sin(),
+        });
     }
     pts
 }
@@ -93,32 +105,87 @@ fn approximate_bulge(p1: &Point, p2: &Point, bulge: f64, segments: usize) -> Vec
     let mut pts = Vec::new();
     for i in 0..=segments {
         let a = start_ang + step * i as f64;
-        pts.push(Point { x: cx + r * a.cos(), y: cy + r * a.sin() });
+        pts.push(Point {
+            x: cx + r * a.cos(),
+            y: cy + r * a.sin(),
+        });
     }
     pts
 }
 
+fn connect_open_polys(mut open: Vec<Vec<Point>>, mut closed: Vec<Polygon>) -> Vec<Polygon> {
+    while let Some(mut current) = open.pop() {
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let mut i = 0;
+            while i < open.len() {
+                let other = &open[i];
+                let first_cur = current.first().unwrap();
+                let last_cur = current.last().unwrap();
+                let first_other = other.first().unwrap();
+                let last_other = other.last().unwrap();
+
+                if points_equal(last_cur, first_other) {
+                    current.extend(other.iter().skip(1).cloned());
+                    open.remove(i);
+                    changed = true;
+                } else if points_equal(last_cur, last_other) {
+                    current.extend(other.iter().rev().skip(1).cloned());
+                    open.remove(i);
+                    changed = true;
+                } else if points_equal(first_cur, last_other) {
+                    let mut add: Vec<Point> = other.iter().rev().skip(1).cloned().collect();
+                    add.extend(current);
+                    current = add;
+                    open.remove(i);
+                    changed = true;
+                } else if points_equal(first_cur, first_other) {
+                    let mut add: Vec<Point> = other.iter().skip(1).rev().cloned().collect();
+                    add.extend(current);
+                    current = add;
+                    open.remove(i);
+                    changed = true;
+                } else {
+                    i += 1;
+                }
+                if changed {
+                    break;
+                }
+            }
+        }
+
+        let is_closed = points_equal(current.first().unwrap(), current.last().unwrap());
+        if is_closed && current.len() > 1 {
+            current.pop();
+        }
+        closed.push(Polygon {
+            id: 0,
+            points: current,
+            closed: is_closed,
+        });
+    }
+    closed
+}
+
 #[cfg(feature = "dxf")]
-pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
+pub fn part_from_dxf(path: &Path) -> anyhow::Result<Part> {
     let drawing = Drawing::load_file(path)?;
-    let mut polys = Vec::new();
+    let mut open = Vec::new();
+    let mut closed = Vec::new();
     for e in drawing.entities() {
         match &e.specific {
             EntityType::Line(line) => {
-                polys.push(Polygon {
-                    id: 0,
-                    points: vec![
-                        Point {
-                            x: line.p1.x,
-                            y: line.p1.y,
-                        },
-                        Point {
-                            x: line.p2.x,
-                            y: line.p2.y,
-                        },
-                    ],
-                    closed: false,
-                });
+                open.push(vec![
+                    Point {
+                        x: line.p1.x,
+                        y: line.p1.y,
+                    },
+                    Point {
+                        x: line.p2.x,
+                        y: line.p2.y,
+                    },
+                ]);
             }
             EntityType::LwPolyline(poly) => {
                 let mut pts = Vec::new();
@@ -131,15 +198,25 @@ pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
                         } else if poly.is_closed() {
                             0
                         } else {
-                            pts.push(Point { x: curr.x, y: curr.y });
+                            pts.push(Point {
+                                x: curr.x,
+                                y: curr.y,
+                            });
                             continue;
                         };
                         let next = &vtx[next_idx];
-                        let p1 = Point { x: curr.x, y: curr.y };
-                        let p2 = Point { x: next.x, y: next.y };
+                        let p1 = Point {
+                            x: curr.x,
+                            y: curr.y,
+                        };
+                        let p2 = Point {
+                            x: next.x,
+                            y: next.y,
+                        };
                         if curr.bulge.abs() > f64::EPSILON {
                             let theta = 4.0 * curr.bulge.atan();
-                            let segs = ((theta.abs() / std::f64::consts::TAU) * 32.0).ceil() as usize;
+                            let segs =
+                                ((theta.abs() / std::f64::consts::TAU) * 32.0).ceil() as usize;
                             let arc = approximate_bulge(&p1, &p2, curr.bulge, segs.max(1));
                             if pts.last().map_or(true, |p| p.x != p1.x || p.y != p1.y) {
                                 pts.push(p1);
@@ -151,10 +228,19 @@ pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
                     }
                     if !poly.is_closed() {
                         if let Some(last) = vtx.last() {
-                            pts.push(Point { x: last.x, y: last.y });
+                            pts.push(Point {
+                                x: last.x,
+                                y: last.y,
+                            });
                         }
+                        open.push(pts);
+                    } else {
+                        closed.push(Polygon {
+                            id: 0,
+                            points: pts,
+                            closed: true,
+                        });
                     }
-                    polys.push(Polygon { id: 0, points: pts, closed: poly.is_closed() });
                 }
             }
             EntityType::Polyline(poly) => {
@@ -168,15 +254,25 @@ pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
                         } else if poly.is_closed() {
                             0
                         } else {
-                            pts.push(Point { x: curr.location.x, y: curr.location.y });
+                            pts.push(Point {
+                                x: curr.location.x,
+                                y: curr.location.y,
+                            });
                             continue;
                         };
                         let next = &verts[next_idx];
-                        let p1 = Point { x: curr.location.x, y: curr.location.y };
-                        let p2 = Point { x: next.location.x, y: next.location.y };
+                        let p1 = Point {
+                            x: curr.location.x,
+                            y: curr.location.y,
+                        };
+                        let p2 = Point {
+                            x: next.location.x,
+                            y: next.location.y,
+                        };
                         if curr.bulge.abs() > f64::EPSILON {
                             let theta = 4.0 * curr.bulge.atan();
-                            let segs = ((theta.abs() / std::f64::consts::TAU) * 32.0).ceil() as usize;
+                            let segs =
+                                ((theta.abs() / std::f64::consts::TAU) * 32.0).ceil() as usize;
                             let arc = approximate_bulge(&p1, &p2, curr.bulge, segs.max(1));
                             if pts.last().map_or(true, |p| p.x != p1.x || p.y != p1.y) {
                                 pts.push(p1);
@@ -188,10 +284,19 @@ pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
                     }
                     if !poly.is_closed() {
                         if let Some(last) = verts.last() {
-                            pts.push(Point { x: last.location.x, y: last.location.y });
+                            pts.push(Point {
+                                x: last.location.x,
+                                y: last.location.y,
+                            });
                         }
+                        open.push(pts);
+                    } else {
+                        closed.push(Polygon {
+                            id: 0,
+                            points: pts,
+                            closed: true,
+                        });
                     }
-                    polys.push(Polygon { id: 0, points: pts, closed: poly.is_closed() });
                 }
             }
             EntityType::Circle(c) => {
@@ -203,7 +308,7 @@ pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
                     let y = c.center.y + c.radius * theta.sin();
                     pts.push(Point { x, y });
                 }
-                polys.push(Polygon {
+                closed.push(Polygon {
                     id: 0,
                     points: pts,
                     closed: true,
@@ -223,7 +328,7 @@ pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
                     (arc.start_angle + end).to_radians(),
                     segs.max(1),
                 );
-                polys.push(Polygon { id: 0, points: pts, closed: false });
+                open.push(pts);
             }
             EntityType::Ellipse(el) => {
                 let mut end = el.end_parameter - el.start_parameter;
@@ -240,18 +345,19 @@ pub fn polygons_from_dxf(path: &Path) -> anyhow::Result<Vec<Polygon>> {
                     el.start_parameter + end,
                     segs.max(1),
                 );
-                polys.push(Polygon { id: 0, points: pts, closed: false });
+                open.push(pts);
             }
             _ => {}
         }
     }
-    for (i, p) in polys.iter_mut().enumerate() {
+    let mut all = connect_open_polys(open, closed);
+    for (i, p) in all.iter_mut().enumerate() {
         p.id = i;
     }
-    Ok(polys)
+    Ok(Part::new(all))
 }
 
 #[cfg(not(feature = "dxf"))]
-pub fn polygons_from_dxf(_path: &Path) -> anyhow::Result<Vec<Polygon>> {
+pub fn part_from_dxf(_path: &Path) -> anyhow::Result<Part> {
     Err(anyhow::anyhow!("DXF support not enabled"))
 }
