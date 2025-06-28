@@ -116,14 +116,29 @@ fn main() {
         rotations: cfg.rotations,
         spacing: cfg.spacing,
     };
-    let mut ga = ga::GeneticAlgorithm::new(&all_polys, &bin, ga_cfg);
+    let mut ga = match ga::GeneticAlgorithm::new(&all_polys, &bin, ga_cfg) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Failed to initialize algorithm: {}", e);
+            return;
+        }
+    };
     ga.evolve(10);
-    let best = ga
+    let best = match ga
         .population
         .iter()
-        .min_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap())
-        .unwrap();
+        .min_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
+    {
+        Some(v) => v,
+        None => {
+            eprintln!("No population available to evaluate");
+            return;
+        }
+    };
     let svg = ga.create_svg(best);
-    std::fs::write("nested.svg", svg).expect("write svg");
+    if let Err(e) = std::fs::write("nested.svg", svg) {
+        eprintln!("Failed to write SVG: {}", e);
+        return;
+    }
     println!("Nested result written to nested.svg");
 }
