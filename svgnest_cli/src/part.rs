@@ -1,5 +1,7 @@
 use crate::{
-    geometry::{Bounds, get_polygons_bounds, rotate_polygon},
+    geometry::{
+        normalize_polygons, Bounds, get_polygons_bounds, rotate_polygon,
+    },
     svg_parser::Polygon,
 };
 
@@ -10,7 +12,9 @@ pub struct Part {
 
 impl Part {
     pub fn new(polys: Vec<Polygon>) -> Self {
-        Self { polygons: polys }
+        let mut p = polys;
+        normalize_polygons(&mut p);
+        Self { polygons: p }
     }
 
     pub fn rotated(&self, angle: f64) -> Vec<Polygon> {
