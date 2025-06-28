@@ -35,77 +35,10 @@ impl Transform {
 /// Parse a `transform` attribute into a [`Transform`].
 fn parse_transform(value: &str) -> Transform {
     use std::str::FromStr;
-    let mut result = Transform::identity();
-    let tokens = value.split(|c| c == ')' || c == ',').collect::<Vec<_>>();
-    for token in tokens {
-        let trimmed = token.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("translate(") {
-            let mut nums = rest.split_whitespace();
-            let tx = nums
-                .next()
-                .and_then(|v| f64::from_str(v).ok())
-                .unwrap_or(0.0);
-            let ty = nums
-                .next()
-                .and_then(|v| f64::from_str(v).ok())
-                .unwrap_or(0.0);
-            let t = Transform([1.0, 0.0, 0.0, 1.0, tx, ty]);
-            result = result.multiply(&t);
-        } else if let Some(rest) = trimmed.strip_prefix("scale(") {
-            let mut nums = rest.split_whitespace();
-            let sx = nums
-                .next()
-                .and_then(|v| f64::from_str(v).ok())
-                .unwrap_or(1.0);
-            let sy = nums
-                .next()
-                .and_then(|v| f64::from_str(v).ok())
-                .unwrap_or(sx);
-            let t = Transform([sx, 0.0, 0.0, sy, 0.0, 0.0]);
-            result = result.multiply(&t);
-        } else if let Some(rest) = trimmed.strip_prefix("rotate(") {
-            let nums: Vec<_> = rest.split_whitespace().collect();
-            if let Ok(angle) = f64::from_str(nums.get(0).unwrap_or(&"0")) {
-                let (sx, sy) = if nums.len() == 3 {
-                    (
-                        nums.get(1)
-                            .and_then(|v| f64::from_str(v).ok())
-                            .unwrap_or(0.0),
-                        nums.get(2)
-                            .and_then(|v| f64::from_str(v).ok())
-                            .unwrap_or(0.0),
-                    )
-                } else {
-                    (0.0, 0.0)
-                };
-                let rad = angle.to_radians();
-                let cos = rad.cos();
-                let sin = rad.sin();
-                let rotation = Transform([cos, sin, -sin, cos, 0.0, 0.0]);
-                let pre = Transform([1.0, 0.0, 0.0, 1.0, sx, sy]);
-                let post = Transform([1.0, 0.0, 0.0, 1.0, -sx, -sy]);
-                result = result.multiply(&pre).multiply(&rotation).multiply(&post);
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("matrix(") {
-            let nums: Vec<_> = rest.split_whitespace().collect();
-            if nums.len() >= 6 {
-                if let (Ok(a), Ok(b), Ok(c), Ok(d), Ok(e), Ok(f)) = (
-                    f64::from_str(nums[0]),
-                    f64::from_str(nums[1]),
-                    f64::from_str(nums[2]),
-                    f64::from_str(nums[3]),
-                    f64::from_str(nums[4]),
-                    f64::from_str(nums[5]),
-                ) {
-                    result = result.multiply(&Transform([a, b, c, d, e, f]));
-                }
-            }
-        }
+    match svgtypes::Transform::from_str(value) {
+        Ok(t) => Transform([t.a, t.b, t.c, t.d, t.e, t.f]),
+        Err(_) => Transform::identity(),
     }
-    result
 }
 
 /// Single point.
@@ -421,5 +354,47 @@ mod tests {
         }
 
         assert_eq!(*ours, expected);
+    }
+
+    #[test]
+    fn parse_transform_translate_spaces() {
+        let t = parse_transform("translate(10 20)");
+        let (x, y) = t.apply(0.0, 0.0);
+        assert!((x - 10.0).abs() < 1e-6 && (y - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_transform_translate_commas() {
+        let t = parse_transform("translate(10,20)");
+        let (x, y) = t.apply(0.0, 0.0);
+        assert!((x - 10.0).abs() < 1e-6 && (y - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_transform_scale_spaces() {
+        let t = parse_transform("scale(2 3)");
+        let (x, y) = t.apply(1.0, 1.0);
+        assert!((x - 2.0).abs() < 1e-6 && (y - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_transform_scale_commas() {
+        let t = parse_transform("scale(2,3)");
+        let (x, y) = t.apply(1.0, 1.0);
+        assert!((x - 2.0).abs() < 1e-6 && (y - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_transform_rotate_spaces() {
+        let t = parse_transform("rotate(90 1 0)");
+        let (x, y) = t.apply(2.0, 0.0);
+        assert!((x - 1.0).abs() < 1e-6 && (y - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_transform_rotate_commas() {
+        let t = parse_transform("rotate(90,1,0)");
+        let (x, y) = t.apply(2.0, 0.0);
+        assert!((x - 1.0).abs() < 1e-6 && (y - 1.0).abs() < 1e-6);
     }
 }
