@@ -1,8 +1,9 @@
 use rand::prelude::*;
 use rayon::prelude::*;
 
-use crate::geometry::{Bounds, get_polygon_bounds, rotate_polygon};
+use crate::geometry::{get_polygon_bounds, rotate_polygon, Bounds};
 use crate::svg_parser::Polygon;
+use anyhow::{self, Result};
 
 #[derive(Clone, Copy)]
 pub struct GAConfig {
@@ -27,8 +28,13 @@ pub struct GeneticAlgorithm<'a> {
 }
 
 impl<'a> GeneticAlgorithm<'a> {
-    pub fn new(parts: &'a [Polygon], bin: &'a Polygon, config: GAConfig) -> Self {
-        let bin_bounds = get_polygon_bounds(&bin.points).expect("bin bounds");
+    pub fn new(
+        parts: &'a [Polygon],
+        bin: &'a Polygon,
+        config: GAConfig,
+    ) -> Result<Self> {
+        let bin_bounds = get_polygon_bounds(&bin.points)
+            .ok_or_else(|| anyhow::anyhow!("failed to compute bin bounds"))?;
         let mut ga = GeneticAlgorithm {
             parts,
             bin_bounds,
@@ -46,7 +52,7 @@ impl<'a> GeneticAlgorithm<'a> {
             let m = ga.mutate(&base);
             ga.population.push(m);
         }
-        ga
+        Ok(ga)
     }
 
     fn random_angle(&self, part: &Polygon) -> f64 {
@@ -138,15 +144,14 @@ impl<'a> GeneticAlgorithm<'a> {
         let mut lower = 0.0;
         let weight = 1.0 / idxs.len() as f64;
         let mut upper = weight;
-        for &i in &idxs {
+        for (pos, &i) in idxs.iter().enumerate() {
             if rand > lower && rand < upper {
                 return i;
             }
             lower = upper;
             upper += 2.0
                 * weight
-                * ((idxs.len() - idxs.iter().position(|&x| x == i).unwrap()) as f64
-                    / idxs.len() as f64);
+                * ((idxs.len() - pos) as f64 / idxs.len() as f64);
         }
         idxs[0]
     }
