@@ -64,7 +64,7 @@ impl<'a> GeneticAlgorithm<'a> {
         let mut rng = thread_rng();
         angles.shuffle(&mut rng);
         for angle in angles {
-            let rotated = rotate_polygons(&part.polygons, angle);
+            let rotated = part.rotated(angle);
             if let Some(b) = get_polygons_bounds(&rotated) {
                 if b.width <= self.bin_bounds.width && b.height <= self.bin_bounds.height {
                     return angle;
@@ -201,7 +201,7 @@ impl<'a> GeneticAlgorithm<'a> {
                 Some(v) => v,
                 None => continue,
             };
-            if x + b.width > self.bin_bounds.width {
+            if x + b.width >= self.bin_bounds.width {
                 bin += 1;
                 x = 0.0;
                 y += self.bin_bounds.height;
@@ -233,7 +233,7 @@ fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config:
     let mut bins = 1;
     for (&idx, &angle) in ind.placement.iter().zip(ind.rotation.iter()) {
         let part = &parts[idx];
-        let rotated = rotate_polygons(&part.polygons, angle);
+        let rotated = part.rotated(angle);
         let b = match get_polygons_bounds(&rotated) {
             Some(v) => v,
             None => continue,
@@ -241,11 +241,11 @@ fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config:
         if b.width > bin_bounds.width || b.height > bin_bounds.height {
             return f64::INFINITY;
         }
-        if x + b.width > bin_bounds.width {
+        if x + b.width >= bin_bounds.width {
             bins += 1;
             x = 0.0;
         }
         x += b.width + config.spacing;
     }
-    bins as f64 * bin_bounds.width + x
+    bins as f64 * bin_bounds.height
 }
