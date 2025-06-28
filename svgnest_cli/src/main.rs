@@ -1,8 +1,9 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-mod svg_parser;
+mod ga;
 mod geometry;
+mod svg_parser;
 
 /// Command line arguments for SVGnest
 #[derive(Parser, Debug)]
@@ -77,5 +78,38 @@ pub fn parse_config() -> Config {
 
 fn main() {
     let cfg = parse_config();
-    println!("{:?}", cfg);
+
+    let mut all_polys = Vec::new();
+    for path in &cfg.inputs {
+        match svg_parser::polygons_from_file(path) {
+            Ok(mut p) => all_polys.append(&mut p),
+            Err(e) => {
+                eprintln!("Failed to parse {}: {}", path.display(), e);
+                return;
+            }
+        }
+    }
+
+    if all_polys.is_empty() {
+        eprintln!("No polygons found in input");
+        return;
+    }
+
+    let bin = all_polys.remove(0);
+    let ga_cfg = ga::GAConfig {
+        population_size: cfg.population_size,
+        mutation_rate: cfg.mutation_rate,
+        rotations: cfg.rotations,
+        spacing: cfg.spacing,
+    };
+    let mut ga = ga::GeneticAlgorithm::new(&all_polys, &bin, ga_cfg);
+    ga.evolve(10);
+    let best = ga
+        .population
+        .iter()
+        .min_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap())
+        .unwrap();
+    let svg = ga.create_svg(best);
+    std::fs::write("nested.svg", svg).expect("write svg");
+    println!("Nested result written to nested.svg");
 }
