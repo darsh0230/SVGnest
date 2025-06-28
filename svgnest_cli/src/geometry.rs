@@ -77,6 +77,34 @@ pub fn rotate_polygons(polys: &[Polygon], angle_deg: f64) -> Vec<Polygon> {
         .collect()
 }
 
+/// Translate polygons so the minimum x and y coordinates become the origin
+pub fn normalize_polygons(polys: &mut [Polygon]) {
+    if polys.is_empty() {
+        return;
+    }
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    for poly in polys.iter() {
+        for p in &poly.points {
+            if p.x < min_x {
+                min_x = p.x;
+            }
+            if p.y < min_y {
+                min_y = p.y;
+            }
+        }
+    }
+    if min_x == 0.0 && min_y == 0.0 {
+        return;
+    }
+    for poly in polys.iter_mut() {
+        for p in &mut poly.points {
+            p.x -= min_x;
+            p.y -= min_y;
+        }
+    }
+}
+
 /// Bounding box that encompasses all provided polygons.
 pub fn get_polygons_bounds(polys: &[Polygon]) -> Option<Bounds> {
     let mut iter = polys.iter().filter_map(|p| get_polygon_bounds(&p.points));
