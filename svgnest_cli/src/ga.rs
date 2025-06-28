@@ -64,7 +64,7 @@ impl<'a> GeneticAlgorithm<'a> {
         let mut rng = thread_rng();
         angles.shuffle(&mut rng);
         for angle in angles {
-            let rotated = rotate_polygons(&part.polygons, angle);
+            let rotated = part.rotated(angle);
             if let Some(b) = get_polygons_bounds(&rotated) {
                 if b.width <= self.bin_bounds.width && b.height <= self.bin_bounds.height {
                     return angle;
@@ -233,7 +233,7 @@ fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config:
     let mut bins = 1;
     for (&idx, &angle) in ind.placement.iter().zip(ind.rotation.iter()) {
         let part = &parts[idx];
-        let rotated = rotate_polygons(&part.polygons, angle);
+        let rotated = part.rotated(angle);
         let b = match get_polygons_bounds(&rotated) {
             Some(v) => v,
             None => continue,
