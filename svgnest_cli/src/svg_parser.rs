@@ -125,13 +125,13 @@ pub struct Polygon {
 }
 
 /// Parse an SVG file and return all polygons.
-pub fn polygons_from_file(path: &Path) -> anyhow::Result<Vec<Polygon>> {
+pub fn polygons_from_file(path: &Path, merge: bool) -> anyhow::Result<Vec<Polygon>> {
     let data = fs::read_to_string(path)?;
-    polygons_from_str(&data)
+    polygons_from_str(&data, merge)
 }
 
 /// Parse an SVG string and return all polygons.
-pub fn polygons_from_str(data: &str) -> anyhow::Result<Vec<Polygon>> {
+pub fn polygons_from_str(data: &str, merge: bool) -> anyhow::Result<Vec<Polygon>> {
     let doc = Document::parse(data)?;
     let root = doc.root_element();
     let mut polys = Vec::new();
@@ -139,7 +139,11 @@ pub fn polygons_from_str(data: &str) -> anyhow::Result<Vec<Polygon>> {
     for (i, p) in polys.iter_mut().enumerate() {
         p.id = i;
     }
-    Ok(polys)
+    if merge {
+        Ok(crate::line_merge::merge_lines(&polys))
+    } else {
+        Ok(polys)
+    }
 }
 
 fn extract_node_polygons(
@@ -335,8 +339,15 @@ mod tests {
     #[test]
     fn parse_simple_rect() {
         let svg = r#"<svg><rect x="0" y="0" width="10" height="10"/></svg>"#;
-        let polys = polygons_from_str(svg).unwrap();
+        let polys = polygons_from_str(svg, false).unwrap();
         assert_eq!(polys.len(), 1);
         assert_eq!(polys[0].points.len(), 4);
+    }
+
+    #[test]
+    fn merge_lines_option() {
+        let svg = "<svg><line x1='0' y1='0' x2='1' y2='0'/><line x1='1' y1='0' x2='0' y2='0'/></svg>";
+        let polys = polygons_from_str(svg, true).unwrap();
+        assert_eq!(polys.len(), 1);
     }
 }

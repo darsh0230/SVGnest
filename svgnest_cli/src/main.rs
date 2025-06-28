@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 mod ga;
 mod geometry;
+mod line_merge;
 mod svg_parser;
 
 /// Command line arguments for SVGnest
@@ -40,6 +41,10 @@ pub struct CliArgs {
     /// Explore concave areas for more robust placement
     #[arg(long, default_value_t = false)]
     pub explore_concave: bool,
+
+    /// Merge overlapping line segments
+    #[arg(long, default_value_t = false)]
+    pub merge_lines: bool,
 }
 
 /// Parsed configuration returned by the CLI
@@ -53,6 +58,7 @@ pub struct Config {
     pub mutation_rate: usize,
     pub use_holes: bool,
     pub explore_concave: bool,
+    pub merge_lines: bool,
 }
 
 impl From<CliArgs> for Config {
@@ -66,6 +72,7 @@ impl From<CliArgs> for Config {
             mutation_rate: args.mutation_rate,
             use_holes: args.use_holes,
             explore_concave: args.explore_concave,
+            merge_lines: args.merge_lines,
         }
     }
 }
@@ -81,7 +88,7 @@ fn main() {
 
     let mut all_polys = Vec::new();
     for path in &cfg.inputs {
-        match svg_parser::polygons_from_file(path) {
+        match svg_parser::polygons_from_file(path, cfg.merge_lines) {
             Ok(mut p) => all_polys.append(&mut p),
             Err(e) => {
                 eprintln!("Failed to parse {}: {}", path.display(), e);
