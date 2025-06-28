@@ -67,3 +67,33 @@ fn cli_processes_dxf() -> Result<(), Box<dyn std::error::Error>> {
     tmp.close()?;
     Ok(())
 }
+
+#[test]
+fn cli_handles_line_input() -> Result<(), Box<dyn std::error::Error>> {
+    let bin = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/bin.svg");
+    let line = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/line.svg");
+    let tmp = TempDir::new()?;
+    Command::cargo_bin("svgnest_cli")?
+        .current_dir(&tmp)
+        .args([
+            "--inputs",
+            bin.to_str().unwrap(),
+            "--inputs",
+            line.to_str().unwrap(),
+            "--population-size",
+            "1",
+            "--mutation-rate",
+            "0",
+            "--rotations",
+            "0",
+            "--spacing",
+            "0",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nested result written"));
+
+    assert!(tmp.path().join("nested.svg").exists());
+    tmp.close()?;
+    Ok(())
+}
