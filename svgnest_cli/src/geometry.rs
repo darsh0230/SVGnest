@@ -82,4 +82,35 @@ mod tests {
         assert_eq!(bounds.width, 1.0);
         assert_eq!(bounds.height, 1.0);
     }
+
+    #[test]
+    fn area_of_triangle_ccw() {
+        let pts = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 1.0, y: 0.0 },
+            Point { x: 0.0, y: 1.0 },
+        ];
+        assert!((polygon_area(&pts) + 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rotate_preserves_bounds() {
+        let pts = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 1.0, y: 0.0 },
+            Point { x: 1.0, y: 1.0 },
+            Point { x: 0.0, y: 1.0 },
+        ];
+        let rotated = rotate_polygon(&pts, 90.0);
+        let b = get_polygon_bounds(&rotated).unwrap();
+        assert!((b.width - 1.0).abs() < 1e-6);
+        assert!((b.height - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn degenerate_polygon() {
+        let pts = vec![Point { x: 0.0, y: 0.0 }, Point { x: 1.0, y: 0.0 }];
+        assert_eq!(polygon_area(&pts), 0.0);
+        assert!(get_polygon_bounds(&pts).is_none());
+    }
 }
