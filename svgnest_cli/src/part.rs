@@ -18,14 +18,17 @@ impl Part {
     }
 
     pub fn rotated(&self, angle: f64) -> Vec<Polygon> {
-        self.polygons
+        let mut result: Vec<Polygon> = self
+            .polygons
             .iter()
             .map(|p| Polygon {
                 id: p.id,
                 points: rotate_polygon(&p.points, angle),
                 closed: p.closed,
             })
-            .collect()
+            .collect();
+        normalize_polygons(&mut result);
+        result
     }
 
     pub fn bounds(&self) -> Option<Bounds> {
