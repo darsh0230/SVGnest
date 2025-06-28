@@ -106,6 +106,12 @@ Performs similarly to commercial software, after both have run for about 5 minut
 
 ![Concave flag example](http://svgnest.com/github/concave.png)
 
+### Command line DXF support
+
+The Rust CLI bundled with this repository can parse basic DXF files. In
+addition to lines and polylines, it now approximates `ARC` and `ELLIPSE`
+entities, as well as polyline segments with a non‑zero bulge value.
+
 ## To-do
 
 - ~~Recursive placement (putting parts in holes of other parts)~~
