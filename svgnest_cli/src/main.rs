@@ -2,6 +2,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 mod svg_parser;
+mod geometry;
 
 /// Command line arguments for SVGnest
 #[derive(Parser, Debug)]
