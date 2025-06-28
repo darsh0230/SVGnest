@@ -9,6 +9,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 roxmltree = "0.20"
 svg-path-parser = "0.1"
+lyon_path = "0.17"
+lyon_svg = "0.17"
 anyhow = "1"
 geo = "0.30.0"
 geo-clipper = "0.9.0"

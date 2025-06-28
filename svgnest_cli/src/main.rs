@@ -16,8 +16,8 @@ pub struct CliArgs {
     pub inputs: Vec<PathBuf>,
 
     /// Maximum error allowed when approximating curves
-    #[arg(long, default_value_t = 0.3)]
-    pub curve_tolerance: f64,
+    #[arg(long = "approx-tolerance", default_value_t = 0.3)]
+    pub approx_tolerance: f64,
 
     /// Minimum space between parts
     #[arg(long, default_value_t = 0.0)]
@@ -52,7 +52,7 @@ pub struct CliArgs {
 #[derive(Debug)]
 pub struct Config {
     pub inputs: Vec<PathBuf>,
-    pub curve_tolerance: f64,
+    pub approx_tolerance: f64,
     pub spacing: f64,
     pub rotations: usize,
     pub population_size: usize,
@@ -66,7 +66,7 @@ impl From<CliArgs> for Config {
     fn from(args: CliArgs) -> Self {
         Self {
             inputs: args.inputs,
-            curve_tolerance: args.curve_tolerance,
+            approx_tolerance: args.approx_tolerance,
             spacing: args.spacing,
             rotations: args.rotations,
             population_size: args.population_size,
@@ -93,7 +93,7 @@ fn main() {
         let res = if ext.eq_ignore_ascii_case("dxf") {
             dxf_parser::polygons_from_dxf(path)
         } else {
-            svg_parser::polygons_from_file(path, cfg.merge_lines)
+            svg_parser::polygons_from_file(path, cfg.merge_lines, cfg.approx_tolerance)
         };
         match res {
             Ok(mut p) => all_polys.append(&mut p),

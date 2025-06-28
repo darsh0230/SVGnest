@@ -1,6 +1,8 @@
 use roxmltree::{Document, Node};
 use std::fs;
 use std::path::Path;
+use lyon_path::{iterator::PathIterator, Path as LyonPath, PathEvent};
+use lyon_svg::path_utils::build_path;
 
 /// Simple 2D transformation matrix represented as [a,b,c,d,e,f].
 #[derive(Clone, Copy, Debug)]
@@ -124,18 +126,53 @@ pub struct Polygon {
     pub closed: bool,
 }
 
+/// Approximate a SVG path into points using recursive subdivision with the given tolerance.
+pub fn approximate_path(d: &str, tol: f64) -> Vec<(bool, Vec<(f64, f64)>)> {
+    let builder = LyonPath::builder().with_svg();
+    let path = match build_path(builder, d) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    let mut result = Vec::new();
+    let mut current = Vec::new();
+    let mut closed = false;
+    for evt in path.iter().flattened(tol as f32) {
+        match evt {
+            PathEvent::Begin { at } => {
+                if !current.is_empty() {
+                    result.push((closed, current));
+                    current = Vec::new();
+                }
+                current.push((at.x as f64, at.y as f64));
+                closed = false;
+            }
+            PathEvent::Line { to, .. } => {
+                current.push((to.x as f64, to.y as f64));
+            }
+            PathEvent::End { close, .. } => {
+                closed = close;
+            }
+            _ => {}
+        }
+    }
+    if !current.is_empty() {
+        result.push((closed, current));
+    }
+    result
+}
+
 /// Parse an SVG file and return all polygons.
-pub fn polygons_from_file(path: &Path, merge: bool) -> anyhow::Result<Vec<Polygon>> {
+pub fn polygons_from_file(path: &Path, merge: bool, tol: f64) -> anyhow::Result<Vec<Polygon>> {
     let data = fs::read_to_string(path)?;
-    polygons_from_str(&data, merge)
+    polygons_from_str(&data, merge, tol)
 }
 
 /// Parse an SVG string and return all polygons.
-pub fn polygons_from_str(data: &str, merge: bool) -> anyhow::Result<Vec<Polygon>> {
+pub fn polygons_from_str(data: &str, merge: bool, tol: f64) -> anyhow::Result<Vec<Polygon>> {
     let doc = Document::parse(data)?;
     let root = doc.root_element();
     let mut polys = Vec::new();
-    extract_node_polygons(root, Transform::identity(), &mut polys)?;
+    extract_node_polygons(root, Transform::identity(), tol, &mut polys)?;
     for (i, p) in polys.iter_mut().enumerate() {
         p.id = i;
     }
@@ -149,6 +186,7 @@ pub fn polygons_from_str(data: &str, merge: bool) -> anyhow::Result<Vec<Polygon>
 fn extract_node_polygons(
     node: Node,
     transform: Transform,
+    tol: f64,
     output: &mut Vec<Polygon>,
 ) -> anyhow::Result<()> {
     let node_transform = node
@@ -160,7 +198,7 @@ fn extract_node_polygons(
     match node.tag_name().name() {
         "path" => {
             if let Some(d) = node.attribute("d") {
-                for (closed, pts) in svg_path_parser::parse(d) {
+                for (closed, pts) in approximate_path(d, tol) {
                     let mapped = pts
                         .into_iter()
                         .map(|(x, y)| {
@@ -327,7 +365,7 @@ fn extract_node_polygons(
     }
 
     for child in node.children().filter(|n| n.is_element()) {
-        extract_node_polygons(child, transform, output)?;
+        extract_node_polygons(child, transform, tol, output)?;
     }
     Ok(())
 }
@@ -339,7 +377,7 @@ mod tests {
     #[test]
     fn parse_simple_rect() {
         let svg = r#"<svg><rect x="0" y="0" width="10" height="10"/></svg>"#;
-        let polys = polygons_from_str(svg, false).unwrap();
+        let polys = polygons_from_str(svg, false, crate::geometry::CURVE_TOLERANCE).unwrap();
         assert_eq!(polys.len(), 1);
         assert_eq!(polys[0].points.len(), 4);
     }
@@ -347,7 +385,41 @@ mod tests {
     #[test]
     fn merge_lines_option() {
         let svg = "<svg><line x1='0' y1='0' x2='1' y2='0'/><line x1='1' y1='0' x2='0' y2='0'/></svg>";
-        let polys = polygons_from_str(svg, true).unwrap();
+        let polys = polygons_from_str(svg, true, crate::geometry::CURVE_TOLERANCE).unwrap();
         assert_eq!(polys.len(), 1);
+    }
+
+    #[test]
+    fn approximate_arc_accuracy() {
+        let d = "M0,0 A10,10 0 0 1 10,0";
+        let paths = approximate_path(d, 0.1);
+        assert_eq!(paths.len(), 1);
+        let (_closed, pts) = &paths[0];
+        let center = (5.0f64, 8.660254037844386f64);
+        for (x, y) in pts {
+            let r = ((x - center.0).powi(2) + (y - center.1).powi(2)).sqrt();
+            println!("pt: ({},{}), r diff: {}", x, y, (r - 10.0).abs());
+            assert!((r - 10.0).abs() <= 0.1 + 1e-6);
+        }
+    }
+
+    #[test]
+    fn approximate_matches_lyon() {
+        let d = "M0,0 C0,10 10,10 10,0";
+        let tol = 0.05;
+        let ours = &approximate_path(d, tol)[0].1;
+
+        let builder = LyonPath::builder().with_svg();
+        let path = build_path(builder, d).unwrap();
+        let mut expected = Vec::new();
+        for evt in path.iter().flattened(tol as f32) {
+            match evt {
+                PathEvent::Begin { at } => expected.push((at.x as f64, at.y as f64)),
+                PathEvent::Line { to, .. } => expected.push((to.x as f64, to.y as f64)),
+                _ => {}
+            }
+        }
+
+        assert_eq!(*ours, expected);
     }
 }
