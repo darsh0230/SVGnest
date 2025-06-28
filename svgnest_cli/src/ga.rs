@@ -195,7 +195,10 @@ impl<'a> GeneticAlgorithm<'a> {
         for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
             let part = &self.parts[idx];
             let rotated = rotate_polygon(&part.points, angle);
-            let b = get_polygon_bounds(&rotated).unwrap();
+            let b = match get_polygon_bounds(&rotated) {
+                Some(v) => v,
+                None => continue,
+            };
             if x + b.width > self.bin_bounds.width {
                 bin += 1;
                 x = 0.0;
