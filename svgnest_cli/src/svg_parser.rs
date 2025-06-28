@@ -116,7 +116,11 @@ pub struct Point {
 /// Polygon composed of points.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Polygon {
+    /// Unique identifier assigned during parsing
+    pub id: usize,
+    /// Vertices of the polygon
     pub points: Vec<Point>,
+    /// Whether the polygon forms a closed path
     pub closed: bool,
 }
 
@@ -132,6 +136,9 @@ pub fn polygons_from_str(data: &str) -> anyhow::Result<Vec<Polygon>> {
     let root = doc.root_element();
     let mut polys = Vec::new();
     extract_node_polygons(root, Transform::identity(), &mut polys)?;
+    for (i, p) in polys.iter_mut().enumerate() {
+        p.id = i;
+    }
     Ok(polys)
 }
 
@@ -158,6 +165,7 @@ fn extract_node_polygons(
                         })
                         .collect();
                     output.push(Polygon {
+                        id: 0,
                         points: mapped,
                         closed,
                     });
@@ -177,6 +185,7 @@ fn extract_node_polygons(
                     }
                 }
                 output.push(Polygon {
+                    id: 0,
                     points: pts,
                     closed: node.tag_name().name() == "polygon",
                 });
@@ -217,6 +226,7 @@ fn extract_node_polygons(
                 })
                 .collect();
             output.push(Polygon {
+                id: 0,
                 points: pts,
                 closed: true,
             });
@@ -246,6 +256,7 @@ fn extract_node_polygons(
                 pts.push(Point { x, y });
             }
             output.push(Polygon {
+                id: 0,
                 points: pts,
                 closed: true,
             });
@@ -280,6 +291,7 @@ fn extract_node_polygons(
                 pts.push(Point { x, y });
             }
             output.push(Polygon {
+                id: 0,
                 points: pts,
                 closed: true,
             });
@@ -300,6 +312,7 @@ fn extract_node_polygons(
                     let (x1, y1) = transform.apply(x1, y1);
                     let (x2, y2) = transform.apply(x2, y2);
                     output.push(Polygon {
+                        id: 0,
                         points: vec![Point { x: x1, y: y1 }, Point { x: x2, y: y2 }],
                         closed: false,
                     });
