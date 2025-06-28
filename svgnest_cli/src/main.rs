@@ -139,7 +139,7 @@ fn main() {
             return;
         }
     };
-    ga.evolve(10);
+    ga.evolve(100);
     let best = match ga.population.iter().min_by(|a, b| {
         a.fitness
             .partial_cmp(&b.fitness)
