@@ -149,13 +149,13 @@ fn main() {
             .partial_cmp(&b.fitness)
             .unwrap_or(std::cmp::Ordering::Equal)
     }) {
-        Some(v) => v,
+        Some(v) => v.clone(),
         None => {
             eprintln!("No population available to evaluate");
             return;
         }
     };
-    let svg = ga.create_svg(best);
+    let svg = ga.create_svg(&best);
     if let Err(e) = std::fs::write("nested.svg", svg) {
         eprintln!("Failed to write SVG: {}", e);
         return;

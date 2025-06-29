@@ -1,5 +1,4 @@
 use rand::prelude::*;
-use rayon::prelude::*;
 
 use crate::geometry::{
     Bounds, get_polygon_bounds, get_polygons_bounds, point_in_polygon,
@@ -48,6 +47,7 @@ pub struct GeneticAlgorithm<'a> {
     parts: &'a [Part],
     bin_bounds: Bounds,
     config: GAConfig,
+    nfp_cache: NfpCache,
     pub population: Vec<Individual>,
 }
 
@@ -59,6 +59,7 @@ impl<'a> GeneticAlgorithm<'a> {
             parts,
             bin_bounds,
             config,
+            nfp_cache: NfpCache::new(config.angle_precision),
             population: Vec::new(),
         };
         let angles: Vec<f64> = parts.iter().map(|p| ga.random_angle(p)).collect();
@@ -95,8 +96,8 @@ impl<'a> GeneticAlgorithm<'a> {
         0.0
     }
 
-    fn evaluate(&self, ind: &Individual) -> f64 {
-        evaluate_static(ind, self.parts, self.bin_bounds, self.config)
+    fn evaluate(&mut self, ind: &Individual) -> f64 {
+        evaluate_static(ind, self.parts, self.bin_bounds, self.config, &mut self.nfp_cache)
     }
 
     fn mutate(&self, ind: &Individual) -> Individual {
@@ -178,9 +179,9 @@ impl<'a> GeneticAlgorithm<'a> {
         let parts = self.parts;
         let bounds = self.bin_bounds;
         let cfg = self.config;
-        self.population.par_iter_mut().for_each(|ind| {
-            ind.fitness = evaluate_static(ind, parts, bounds, cfg);
-        });
+        for ind in &mut self.population {
+            ind.fitness = evaluate_static(ind, parts, bounds, cfg, &mut self.nfp_cache);
+        }
     }
 
     pub fn generation(&mut self) {
@@ -210,7 +211,7 @@ impl<'a> GeneticAlgorithm<'a> {
         self.evaluate_population();
     }
 
-    pub fn create_svg(&self, ind: &Individual) -> String {
+    pub fn create_svg(&mut self, ind: &Individual) -> String {
         // reuse the filtering logic from evaluation so that SVG output ignores
         // parts that cannot fit into the bin
         let mut placement_ids = Vec::new();
@@ -229,7 +230,7 @@ impl<'a> GeneticAlgorithm<'a> {
             rotation,
             fitness: 0.0,
         };
-        let (_height, placement) = layout(&filtered, self.parts, self.bin_bounds, self.config);
+        let (_height, placement) = layout(&filtered, self.parts, self.bin_bounds, self.config, &mut self.nfp_cache);
         let mut body = String::new();
         for p in &placement {
             let part = &self.parts[p.idx];
@@ -255,7 +256,13 @@ impl<'a> GeneticAlgorithm<'a> {
     }
 }
 
-fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config: GAConfig) -> f64 {
+fn evaluate_static(
+    ind: &Individual,
+    parts: &[Part],
+    bin_bounds: Bounds,
+    config: GAConfig,
+    nfp_cache: &mut NfpCache,
+) -> f64 {
     // filter out parts that cannot possibly fit inside the bin
     let mut placement = Vec::new();
     let mut rotation = Vec::new();
@@ -278,7 +285,7 @@ fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config:
         fitness: 0.0,
     };
 
-    let (height, placed) = layout(&filtered, parts, bin_bounds, config);
+    let (height, placed) = layout(&filtered, parts, bin_bounds, config, nfp_cache);
     if !height.is_finite() {
         return f64::INFINITY;
     }
@@ -316,6 +323,7 @@ fn layout(
     parts: &[Part],
     bin_bounds: Bounds,
     config: GAConfig,
+    nfp_cache: &mut NfpCache,
 ) -> (f64, Vec<Placement>) {
     let bin_polygon = vec![
         Point { x: 0.0, y: 0.0 },
@@ -332,7 +340,6 @@ fn layout(
             y: bin_bounds.height,
         },
     ];
-    let mut nfp_cache = NfpCache::new(config.angle_precision);
 
     if !config.explore_concave {
         let mut x = 0.0;
