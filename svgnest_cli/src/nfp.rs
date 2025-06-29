@@ -7,11 +7,17 @@ use geo_clipper::Clipper;
 
 pub struct NfpCache {
     cache: HashMap<(usize, usize, i64, i64), Vec<Point>>, // key with quantized angles
+    pub angle_precision: f64,
 }
 
 impl NfpCache {
-    pub fn new() -> Self {
-        Self { cache: HashMap::new() }
+    pub const DEFAULT_ANGLE_PRECISION: f64 = 1e-3;
+
+    pub fn new(angle_precision: f64) -> Self {
+        Self {
+            cache: HashMap::new(),
+            angle_precision,
+        }
     }
 
     pub fn get_or_generate(
@@ -23,11 +29,12 @@ impl NfpCache {
         a: &[Point],
         b: &[Point],
     ) -> Vec<Point> {
+        let factor = 1.0 / self.angle_precision;
         let key = (
             a_id,
             b_id,
-            (a_angle * 1000.0) as i64,
-            (b_angle * 1000.0) as i64,
+            (a_angle * factor).round() as i64,
+            (b_angle * factor).round() as i64,
         );
         if let Some(v) = self.cache.get(&key) {
             return v.clone();
@@ -35,6 +42,12 @@ impl NfpCache {
         let nfp = minkowski_difference_clip(a, b);
         self.cache.insert(key, nfp.clone());
         nfp
+    }
+}
+
+impl Default for NfpCache {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_ANGLE_PRECISION)
     }
 }
 

@@ -18,6 +18,7 @@ pub struct GAConfig {
     pub spacing: f64,
     pub use_holes: bool,
     pub explore_concave: bool,
+    pub angle_precision: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -331,7 +332,7 @@ fn layout(
             y: bin_bounds.height,
         },
     ];
-    let mut nfp_cache = NfpCache::new();
+    let mut nfp_cache = NfpCache::new(config.angle_precision);
 
     if !config.explore_concave {
         let mut x = 0.0;
