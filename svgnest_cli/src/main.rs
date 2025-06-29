@@ -131,6 +131,8 @@ fn main() {
         mutation_rate: cfg.mutation_rate,
         rotations: cfg.rotations,
         spacing: cfg.spacing,
+        use_holes: cfg.use_holes,
+        explore_concave: cfg.explore_concave,
     };
     let mut ga = match ga::GeneticAlgorithm::new(&parts, &bin, ga_cfg) {
         Ok(v) => v,

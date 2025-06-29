@@ -2,7 +2,7 @@ use rand::prelude::*;
 use rayon::prelude::*;
 
 use crate::geometry::{
-    Bounds, get_polygon_bounds, get_polygons_bounds, rotate_polygon, rotate_polygons,
+    Bounds, get_polygon_bounds, get_polygons_bounds, polygon_area,
 };
 use crate::part::Part;
 use crate::svg_parser::Polygon;
@@ -14,6 +14,24 @@ pub struct GAConfig {
     pub mutation_rate: usize,
     pub rotations: usize,
     pub spacing: f64,
+    pub use_holes: bool,
+    pub explore_concave: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Placement {
+    pub idx: usize,
+    pub angle: f64,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FreeRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 #[derive(Clone)]
@@ -190,37 +208,25 @@ impl<'a> GeneticAlgorithm<'a> {
     }
 
     pub fn create_svg(&self, ind: &Individual) -> String {
-        let mut x = 0.0;
-        let mut y = 0.0;
-        let mut bin = 1;
+        let (_height, placement) = layout(ind, self.parts, self.bin_bounds, self.config);
         let mut body = String::new();
-        for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
-            let part = &self.parts[idx];
-            let rotated = part.rotated(angle);
-            let b = match get_polygons_bounds(&rotated) {
-                Some(v) => v,
-                None => continue,
-            };
-            if x + b.width >= self.bin_bounds.width {
-                bin += 1;
-                x = 0.0;
-                y += self.bin_bounds.height;
-            }
+        for p in &placement {
+            let part = &self.parts[p.idx];
+            let rotated = part.rotated(p.angle);
             for poly in rotated {
                 let points: Vec<String> = poly
                     .points
                     .into_iter()
-                    .map(|p| format!("{},{}", p.x + x, p.y + y))
+                    .map(|pt| format!("{},{}", pt.x + p.x, pt.y + p.y))
                     .collect();
                 body.push_str(&format!(
                     "<polygon points=\"{}\" fill=\"none\" stroke=\"black\"/>\n",
                     points.join(" ")
                 ));
             }
-            x += b.width + self.config.spacing;
         }
         let width = self.bin_bounds.width;
-        let height = self.bin_bounds.height * bin as f64;
+        let height = _height;
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\">{}<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"none\" stroke=\"blue\"/></svg>",
             width, height, body, width, height
@@ -229,23 +235,92 @@ impl<'a> GeneticAlgorithm<'a> {
 }
 
 fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config: GAConfig) -> f64 {
-    let mut x = 0.0;
-    let mut bins = 1;
-    for (&idx, &angle) in ind.placement.iter().zip(ind.rotation.iter()) {
-        let part = &parts[idx];
-        let rotated = part.rotated(angle);
-        let b = match get_polygons_bounds(&rotated) {
-            Some(v) => v,
-            None => continue,
-        };
-        if b.width > bin_bounds.width || b.height > bin_bounds.height {
-            return f64::INFINITY;
+    let (h, _) = layout(ind, parts, bin_bounds, config);
+    h
+}
+
+fn layout(
+    ind: &Individual,
+    parts: &[Part],
+    bin_bounds: Bounds,
+    config: GAConfig,
+) -> (f64, Vec<Placement>) {
+    if !config.explore_concave {
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut bins = 1;
+        let mut placement = Vec::new();
+        for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
+            let part = &parts[idx];
+            let rotated = part.rotated(angle);
+            let b = match get_polygons_bounds(&rotated) {
+                Some(v) => v,
+                None => continue,
+            };
+            if b.width > bin_bounds.width || b.height > bin_bounds.height {
+                return (f64::INFINITY, Vec::new());
+            }
+            if x + b.width >= bin_bounds.width {
+                bins += 1;
+                x = 0.0;
+                y += bin_bounds.height;
+            }
+            placement.push(Placement { idx, angle, x, y });
+            x += b.width + config.spacing;
         }
-        if x + b.width >= bin_bounds.width {
-            bins += 1;
-            x = 0.0;
+        (bin_bounds.height * bins as f64, placement)
+    } else {
+        let mut bins = 1usize;
+        let mut free = vec![FreeRect { x: 0.0, y: 0.0, width: bin_bounds.width, height: bin_bounds.height }];
+        let mut placement = Vec::new();
+        for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
+            let part = &parts[idx];
+            let rotated = part.rotated(angle);
+            let b = match get_polygons_bounds(&rotated) {
+                Some(v) => v,
+                None => continue,
+            };
+            if b.width > bin_bounds.width || b.height > bin_bounds.height {
+                return (f64::INFINITY, Vec::new());
+            }
+            loop {
+                let mut placed = false;
+                for i in 0..free.len() {
+                    let rect = free[i];
+                    if b.width <= rect.width && b.height <= rect.height {
+                        let x = rect.x;
+                        let y = rect.y;
+                        placement.push(Placement { idx, angle, x, y });
+                        free.remove(i);
+                        let right_w = rect.width - b.width - config.spacing;
+                        if right_w > 0.0 {
+                            free.push(FreeRect { x: x + b.width + config.spacing, y, width: right_w, height: b.height });
+                        }
+                        let bottom_h = rect.height - b.height - config.spacing;
+                        if bottom_h > 0.0 {
+                            free.push(FreeRect { x, y: y + b.height + config.spacing, width: rect.width, height: bottom_h });
+                        }
+                        if config.use_holes {
+                            let orient = polygon_area(&rotated[0].points).signum();
+                            for poly in rotated.iter().skip(1) {
+                                let area = polygon_area(&poly.points);
+                                if orient != 0.0 && area.signum() != orient {
+                                    if let Some(hb) = get_polygon_bounds(&poly.points) {
+                                        free.insert(0, FreeRect { x: x + hb.x, y: y + hb.y, width: hb.width, height: hb.height });
+                                    }
+                                }
+                            }
+                        }
+                        placed = true;
+                        break;
+                    }
+                }
+                if placed { break; }
+                let start_y = bin_bounds.height * bins as f64;
+                free.push(FreeRect { x: 0.0, y: start_y, width: bin_bounds.width, height: bin_bounds.height });
+                bins += 1;
+            }
         }
-        x += b.width + config.spacing;
+        (bin_bounds.height * bins as f64, placement)
     }
-    bins as f64 * bin_bounds.height
 }
