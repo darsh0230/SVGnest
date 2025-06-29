@@ -127,6 +127,88 @@ pub fn get_polygons_bounds(polys: &[Polygon]) -> Option<Bounds> {
     })
 }
 
+use geo::{algorithm::convex_hull::ConvexHull, prelude::*, LineString as GeoLineString, MultiPoint, Polygon as GeoPolygon};
+use geo_types::Coord;
+use geo_clipper::{Clipper, EndType, JoinType};
+
+fn to_geo_polygon(points: &[Point]) -> GeoPolygon<f64> {
+    let exterior: GeoLineString<f64> = points.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>().into();
+    GeoPolygon::new(exterior, vec![])
+}
+
+fn to_geo_polygon_translated(points: &[Point], tx: f64, ty: f64) -> GeoPolygon<f64> {
+    let exterior: GeoLineString<f64> = points
+        .iter()
+        .map(|p| (p.x + tx, p.y + ty))
+        .collect::<Vec<_>>()
+        .into();
+    GeoPolygon::new(exterior, vec![])
+}
+
+/// Offset a polygon by the given delta using the Clipper library.
+pub fn offset_polygon(points: &[Point], delta: f64) -> Vec<Vec<Point>> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let poly = to_geo_polygon(points);
+    let mp = poly.offset(delta, JoinType::Miter(1.0), EndType::ClosedPolygon, CLIPPER_SCALE);
+    mp.0
+        .into_iter()
+        .map(|p| {
+            p.exterior()
+                .points()
+                .map(|c| Point { x: c.x(), y: c.y() })
+                .collect()
+        })
+        .collect()
+}
+
+/// Compute a simple Minkowski difference using pairwise vertex subtraction.
+/// This implementation assumes convex polygons and returns the convex hull of
+/// the resulting point set.
+pub fn minkowski_difference(a: &[Point], b: &[Point]) -> Vec<Point> {
+    if a.is_empty() || b.is_empty() {
+        return Vec::new();
+    }
+    let mut pts: Vec<Coord<f64>> = Vec::with_capacity(a.len() * b.len());
+    for pa in a {
+        for pb in b {
+            pts.push(Coord { x: pa.x - pb.x, y: pa.y - pb.y });
+        }
+    }
+    let mp: MultiPoint<f64> = pts.into();
+    let hull: GeoPolygon<f64> = mp.convex_hull();
+    hull.exterior()
+        .points()
+        .map(|c| Point { x: c.x() + b[0].x, y: c.y() + b[0].y })
+        .collect()
+}
+
+/// Returns true if the two polygons intersect when translated by (ax,ay) and (bx,by)
+pub fn polygons_intersect(a: &[Point], b: &[Point], ax: f64, ay: f64, bx: f64, by: f64) -> bool {
+    let pa = to_geo_polygon_translated(a, ax, ay);
+    let pb = to_geo_polygon_translated(b, bx, by);
+    !Clipper::intersection(&pa, &pb, CLIPPER_SCALE).0.is_empty()
+}
+
+/// Returns true if point (x,y) lies inside the polygon using even-odd rule.
+pub fn point_in_polygon(poly: &[Point], x: f64, y: f64) -> bool {
+    let mut inside = false;
+    let mut j = poly.len() - 1;
+    for i in 0..poly.len() {
+        let xi = poly[i].x;
+        let yi = poly[i].y;
+        let xj = poly[j].x;
+        let yj = poly[j].y;
+        let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 1e-9) + xi);
+        if intersect {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,6 +5,7 @@ mod dxf_parser;
 mod ga;
 mod geometry;
 mod line_merge;
+mod nfp;
 mod part;
 mod svg_parser;
 
