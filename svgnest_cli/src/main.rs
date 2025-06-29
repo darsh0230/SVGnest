@@ -39,6 +39,10 @@ pub struct CliArgs {
     #[arg(long, default_value_t = false)]
     pub explore_concave: bool,
 
+    /// Precision used when caching NFPs based on angles
+    #[arg(long, default_value_t = 1e-3)]
+    pub angle_precision: f64,
+
     /// Merge overlapping line segments
     #[arg(long, default_value_t = false)]
     pub merge_lines: bool,
@@ -55,6 +59,7 @@ pub struct Config {
     pub mutation_rate: usize,
     pub use_holes: bool,
     pub explore_concave: bool,
+    pub angle_precision: f64,
     pub merge_lines: bool,
 }
 
@@ -69,6 +74,7 @@ impl From<CliArgs> for Config {
             mutation_rate: args.mutation_rate,
             use_holes: args.use_holes,
             explore_concave: args.explore_concave,
+            angle_precision: args.angle_precision,
             merge_lines: args.merge_lines,
         }
     }
@@ -128,6 +134,7 @@ fn main() {
         spacing: cfg.spacing,
         use_holes: cfg.use_holes,
         explore_concave: cfg.explore_concave,
+        angle_precision: cfg.angle_precision,
     };
     let mut ga = match ga::GeneticAlgorithm::new(&parts, &bin, ga_cfg) {
         Ok(v) => v,
