@@ -101,8 +101,8 @@ Performs similarly to commercial software, after both have run for about 5 minut
 - **Part rotations:** The *possible* number of rotations to evaluate for each part. eg. 4 for only the cardinal directions. Larger values may improve results, but will be slower to converge.
 - **GA population:** The population size for the Genetic Algorithm
 - **GA mutation rate:** The probability of mutation for each gene or part placement. Values from 1-50
-- **Part in part:** When enabled, places parts in the holes of other parts. This is off by default as it can be resource intensive
-- **Explore concave areas:** When enabled, solves the concave edge case at a cost of some performance and placement robustness:
+- **Part in part:** When enabled, places parts in the holes of other parts. This is off by default as it can be resource intensive (use the `--use-holes` flag in the CLI)
+- **Explore concave areas:** When enabled, solves the concave edge case at a cost of some performance and placement robustness (enable with `--explore-concave` when using the CLI):
 
 ![Concave flag example](http://svgnest.com/github/concave.png)
 
