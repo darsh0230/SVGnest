@@ -4,6 +4,7 @@ use std::path::PathBuf;
 mod dxf_parser;
 mod ga;
 mod geometry;
+mod nfp;
 mod line_merge;
 mod part;
 mod svg_parser;
