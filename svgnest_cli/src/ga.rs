@@ -2,7 +2,8 @@ use rand::prelude::*;
 use rayon::prelude::*;
 
 use crate::geometry::{
-    Bounds, get_polygon_bounds, get_polygons_bounds, point_in_polygon, polygon_area,
+    Bounds, get_polygon_bounds, get_polygons_bounds, point_in_polygon,
+    polygon_area, polygons_intersect, polygon_contains_polygon,
 };
 use crate::nfp::{self, NfpCache};
 use crate::part::Part;
@@ -361,6 +362,7 @@ fn layout(
             // check against already placed parts
             for p in &placement {
                 let other_rot = parts[p.idx].rotated(p.angle);
+                let orient_other = polygon_area(&other_rot[0].points).signum();
                 let nfp = nfp_cache.get_or_generate(
                     p.idx,
                     idx,
@@ -371,6 +373,35 @@ fn layout(
                 );
                 if nfp.len() >= 3 && point_in_polygon(&nfp, x - p.x, y - p.y) {
                     return (f64::INFINITY, Vec::new());
+                }
+                for op in &other_rot {
+                    if polygon_area(&op.points).signum() != orient_other {
+                        continue; // hole
+                    }
+                    for rp in &rotated {
+                        if polygons_intersect(
+                            &op.points,
+                            &rp.points,
+                            p.x,
+                            p.y,
+                            x,
+                            y,
+                        ) {
+                            let mut in_hole = false;
+                            for hole in &other_rot {
+                                if polygon_area(&hole.points).signum() == orient_other {
+                                    continue;
+                                }
+                                if polygon_contains_polygon(&hole.points, &rp.points, p.x, p.y, x, y) {
+                                    in_hole = true;
+                                    break;
+                                }
+                            }
+                            if !in_hole {
+                                return (f64::INFINITY, Vec::new());
+                            }
+                        }
+                    }
                 }
             }
 
@@ -417,6 +448,7 @@ fn layout(
                         let mut collide = false;
                         for p in &placement {
                             let other_rot = parts[p.idx].rotated(p.angle);
+                            let orient_other = polygon_area(&other_rot[0].points).signum();
                             let nfp = nfp_cache.get_or_generate(
                                 p.idx,
                                 idx,
@@ -427,6 +459,42 @@ fn layout(
                             );
                             if nfp.len() >= 3 && point_in_polygon(&nfp, x - p.x, y - p.y) {
                                 collide = true;
+                                break;
+                            }
+                            for op in &other_rot {
+                                if polygon_area(&op.points).signum() != orient_other {
+                                    continue;
+                                }
+                                for rp in &rotated {
+                                    if polygons_intersect(
+                                        &op.points,
+                                        &rp.points,
+                                        p.x,
+                                        p.y,
+                                        x,
+                                        y,
+                                    ) {
+                                        let mut in_hole = false;
+                                        for hole in &other_rot {
+                                            if polygon_area(&hole.points).signum() == orient_other {
+                                                continue;
+                                            }
+                                            if polygon_contains_polygon(&hole.points, &rp.points, p.x, p.y, x, y) {
+                                                in_hole = true;
+                                                break;
+                                            }
+                                        }
+                                        if !in_hole {
+                                            collide = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if collide {
+                                    break;
+                                }
+                            }
+                            if collide {
                                 break;
                             }
                         }
