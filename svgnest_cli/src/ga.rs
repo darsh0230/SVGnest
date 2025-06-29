@@ -2,10 +2,11 @@ use rand::prelude::*;
 use rayon::prelude::*;
 
 use crate::geometry::{
-    Bounds, get_polygon_bounds, get_polygons_bounds, polygon_area,
+    Bounds, get_polygon_bounds, get_polygons_bounds, point_in_polygon, polygon_area,
 };
+use crate::nfp::{self, NfpCache};
 use crate::part::Part;
-use crate::svg_parser::Polygon;
+use crate::svg_parser::{Point, Polygon};
 use anyhow::{self, Result};
 
 #[derive(Clone, Copy)]
@@ -221,7 +222,11 @@ impl<'a> GeneticAlgorithm<'a> {
                 }
             }
         }
-        let filtered = Individual { placement: placement_ids, rotation, fitness: 0.0 };
+        let filtered = Individual {
+            placement: placement_ids,
+            rotation,
+            fitness: 0.0,
+        };
         let (_height, placement) = layout(&filtered, self.parts, self.bin_bounds, self.config);
         let mut body = String::new();
         for p in &placement {
@@ -310,11 +315,28 @@ fn layout(
     bin_bounds: Bounds,
     config: GAConfig,
 ) -> (f64, Vec<Placement>) {
+    let bin_polygon = vec![
+        Point { x: 0.0, y: 0.0 },
+        Point {
+            x: bin_bounds.width,
+            y: 0.0,
+        },
+        Point {
+            x: bin_bounds.width,
+            y: bin_bounds.height,
+        },
+        Point {
+            x: 0.0,
+            y: bin_bounds.height,
+        },
+    ];
+    let mut nfp_cache = NfpCache::new();
+
     if !config.explore_concave {
         let mut x = 0.0;
         let mut y = 0.0;
         let mut bins = 1;
-        let mut placement = Vec::new();
+        let mut placement: Vec<Placement> = Vec::new();
         for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
             let part = &parts[idx];
             let rotated = part.rotated(angle);
@@ -322,22 +344,49 @@ fn layout(
                 Some(v) => v,
                 None => continue,
             };
+
             if b.width > bin_bounds.width || b.height > bin_bounds.height {
                 return (f64::INFINITY, Vec::new());
             }
+
             if x + b.width >= bin_bounds.width {
                 bins += 1;
                 x = 0.0;
                 y += bin_bounds.height;
             }
+
+            // bin nfp for usage (computed but not used directly)
+            let _bin_nfp = nfp::inner_fit_polygon(&bin_polygon, &rotated[0].points, config.spacing);
+
+            // check against already placed parts
+            for p in &placement {
+                let other_rot = parts[p.idx].rotated(p.angle);
+                let nfp = nfp_cache.get_or_generate(
+                    p.idx,
+                    idx,
+                    p.angle,
+                    angle,
+                    &other_rot[0].points,
+                    &rotated[0].points,
+                );
+                if nfp.len() >= 3 && point_in_polygon(&nfp, x - p.x, y - p.y) {
+                    return (f64::INFINITY, Vec::new());
+                }
+            }
+
             placement.push(Placement { idx, angle, x, y });
             x += b.width + config.spacing;
         }
         (bin_bounds.height * bins as f64, placement)
     } else {
         let mut bins = 1usize;
-        let mut free = vec![FreeRect { x: 0.0, y: 0.0, width: bin_bounds.width, height: bin_bounds.height }];
-        let mut placement = Vec::new();
+        let mut free = vec![FreeRect {
+            x: 0.0,
+            y: 0.0,
+            width: bin_bounds.width,
+            height: bin_bounds.height,
+        }];
+        let mut placement: Vec<Placement> = Vec::new();
         for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
             let part = &parts[idx];
             let rotated = part.rotated(angle);
@@ -345,9 +394,11 @@ fn layout(
                 Some(v) => v,
                 None => continue,
             };
+
             if b.width > bin_bounds.width || b.height > bin_bounds.height {
                 return (f64::INFINITY, Vec::new());
             }
+
             loop {
                 let mut placed = false;
                 for i in 0..free.len() {
@@ -355,15 +406,53 @@ fn layout(
                     if b.width <= rect.width && b.height <= rect.height {
                         let x = rect.x;
                         let y = rect.y;
+
+                        // compute bin nfp (not used directly)
+                        let _ = nfp::inner_fit_polygon(
+                            &bin_polygon,
+                            &rotated[0].points,
+                            config.spacing,
+                        );
+
+                        let mut collide = false;
+                        for p in &placement {
+                            let other_rot = parts[p.idx].rotated(p.angle);
+                            let nfp = nfp_cache.get_or_generate(
+                                p.idx,
+                                idx,
+                                p.angle,
+                                angle,
+                                &other_rot[0].points,
+                                &rotated[0].points,
+                            );
+                            if nfp.len() >= 3 && point_in_polygon(&nfp, x - p.x, y - p.y) {
+                                collide = true;
+                                break;
+                            }
+                        }
+                        if collide {
+                            continue;
+                        }
+
                         placement.push(Placement { idx, angle, x, y });
                         free.remove(i);
                         let right_w = rect.width - b.width - config.spacing;
                         if right_w > 0.0 {
-                            free.push(FreeRect { x: x + b.width + config.spacing, y, width: right_w, height: b.height });
+                            free.push(FreeRect {
+                                x: x + b.width + config.spacing,
+                                y,
+                                width: right_w,
+                                height: b.height,
+                            });
                         }
                         let bottom_h = rect.height - b.height - config.spacing;
                         if bottom_h > 0.0 {
-                            free.push(FreeRect { x, y: y + b.height + config.spacing, width: rect.width, height: bottom_h });
+                            free.push(FreeRect {
+                                x,
+                                y: y + b.height + config.spacing,
+                                width: rect.width,
+                                height: bottom_h,
+                            });
                         }
                         if config.use_holes {
                             let orient = polygon_area(&rotated[0].points).signum();
@@ -371,7 +460,15 @@ fn layout(
                                 let area = polygon_area(&poly.points);
                                 if orient != 0.0 && area.signum() != orient {
                                     if let Some(hb) = get_polygon_bounds(&poly.points) {
-                                        free.insert(0, FreeRect { x: x + hb.x, y: y + hb.y, width: hb.width, height: hb.height });
+                                        free.insert(
+                                            0,
+                                            FreeRect {
+                                                x: x + hb.x,
+                                                y: y + hb.y,
+                                                width: hb.width,
+                                                height: hb.height,
+                                            },
+                                        );
                                     }
                                 }
                             }
@@ -380,9 +477,16 @@ fn layout(
                         break;
                     }
                 }
-                if placed { break; }
+                if placed {
+                    break;
+                }
                 let start_y = bin_bounds.height * bins as f64;
-                free.push(FreeRect { x: 0.0, y: start_y, width: bin_bounds.width, height: bin_bounds.height });
+                free.push(FreeRect {
+                    x: 0.0,
+                    y: start_y,
+                    width: bin_bounds.width,
+                    height: bin_bounds.height,
+                });
                 bins += 1;
             }
         }
