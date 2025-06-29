@@ -1,5 +1,5 @@
 use crate::svg_parser::{Point, Polygon};
-use geo::{Area, BoundingRect, LineString, Rotate, point};
+use geo::{Area, BoundingRect, LineString, Rotate, Translate, point};
 
 /// Bounding box of a polygon
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -127,7 +127,7 @@ pub fn get_polygons_bounds(polys: &[Polygon]) -> Option<Bounds> {
     })
 }
 
-use geo::{algorithm::convex_hull::ConvexHull, prelude::*, LineString as GeoLineString, MultiPoint, Polygon as GeoPolygon};
+use geo::{prelude::*, LineString as GeoLineString, MultiPolygon, Polygon as GeoPolygon};
 use geo_types::Coord;
 use geo_clipper::{Clipper, EndType, JoinType};
 
@@ -166,22 +166,48 @@ pub fn offset_polygon(points: &[Point], delta: f64) -> Vec<Vec<Point>> {
 /// Compute a simple Minkowski difference using pairwise vertex subtraction.
 /// This implementation assumes convex polygons and returns the convex hull of
 /// the resulting point set.
-pub fn minkowski_difference(a: &[Point], b: &[Point]) -> Vec<Point> {
+pub fn minkowski_difference_clip(a: &[Point], b: &[Point]) -> Vec<Point> {
+    use std::cmp::Ordering;
+
     if a.is_empty() || b.is_empty() {
         return Vec::new();
     }
-    let mut pts: Vec<Coord<f64>> = Vec::with_capacity(a.len() * b.len());
-    for pa in a {
-        for pb in b {
-            pts.push(Coord { x: pa.x - pb.x, y: pa.y - pb.y });
-        }
+
+    let a_poly = to_geo_polygon(a);
+    let b_poly = to_geo_polygon(b);
+
+    // Invert B around the origin
+    let inv_b = b_poly.map_coords(|c| Coord { x: -c.x, y: -c.y });
+
+    // Translate inverted B by each vertex of A and union the results
+    let mut mp = MultiPolygon(vec![]);
+    for v in a_poly.exterior().points() {
+        let translated = inv_b.translate(v.x(), v.y());
+        mp = if mp.0.is_empty() {
+            MultiPolygon(vec![translated])
+        } else {
+            geo_clipper::Clipper::union(&mp, &translated, CLIPPER_SCALE)
+        };
     }
-    let mp: MultiPoint<f64> = pts.into();
-    let hull: GeoPolygon<f64> = mp.convex_hull();
-    hull.exterior()
-        .points()
-        .map(|c| Point { x: c.x() + b[0].x, y: c.y() + b[0].y })
-        .collect()
+
+    // Select the polygon with the largest area
+    let poly_opt = mp
+        .0
+        .into_iter()
+        .max_by(|p1, p2| {
+            p1.unsigned_area()
+                .partial_cmp(&p2.unsigned_area())
+                .unwrap_or(Ordering::Equal)
+        });
+
+    if let Some(poly) = poly_opt {
+        poly.exterior()
+            .points()
+            .map(|c| Point { x: c.x() + b[0].x, y: c.y() + b[0].y })
+            .collect()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Returns true if the two polygons intersect when translated by (ax,ay) and (bx,by)

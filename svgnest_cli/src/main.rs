@@ -1,13 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-mod dxf_parser;
-mod ga;
-mod geometry;
-mod line_merge;
-mod nfp;
-mod part;
-mod svg_parser;
+use svgnest_cli::{dxf_parser, ga, part, svg_parser};
 
 /// Command line arguments for SVGnest
 #[derive(Parser, Debug)]
