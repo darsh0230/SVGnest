@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::svg_parser::Point;
-use crate::geometry::{minkowski_difference, offset_polygon};
+use crate::geometry::{minkowski_difference_clip, offset_polygon};
 
 pub struct NfpCache {
     cache: HashMap<(usize, usize, i64, i64), Vec<Point>>, // key with quantized angles
@@ -30,7 +30,7 @@ impl NfpCache {
         if let Some(v) = self.cache.get(&key) {
             return v.clone();
         }
-        let nfp = minkowski_difference(a, b);
+        let nfp = minkowski_difference_clip(a, b);
         self.cache.insert(key, nfp.clone());
         nfp
     }
@@ -38,7 +38,7 @@ impl NfpCache {
 
 /// Simple outer no-fit polygon using Minkowski difference.
 pub fn no_fit_polygon(a: &[Point], b: &[Point]) -> Vec<Point> {
-    minkowski_difference(a, b)
+    minkowski_difference_clip(a, b)
 }
 
 /// Generate inner fit polygons by offsetting the container and computing the
@@ -47,6 +47,6 @@ pub fn inner_fit_polygon(container: &[Point], part: &[Point], spacing: f64) -> V
     let offsets = offset_polygon(container, -spacing.abs());
     offsets
         .into_iter()
-        .map(|poly| minkowski_difference(&poly, part))
+        .map(|poly| minkowski_difference_clip(&poly, part))
         .collect()
 }
