@@ -232,3 +232,29 @@ fn cli_explore_concave_packs_tighter() -> Result<(), Box<dyn std::error::Error>>
     tmp2.close()?;
     Ok(())
 }
+
+#[test]
+fn cli_unplaceable_rotated_parts() -> Result<(), Box<dyn std::error::Error>> {
+    let bin = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/smallbin.svg");
+    let part = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rect6x4.svg");
+    let tmp = TempDir::new()?;
+    Command::cargo_bin("svgnest_cli")?
+        .current_dir(&tmp)
+        .args([
+            "--inputs", bin.to_str().unwrap(),
+            "--inputs", part.to_str().unwrap(),
+            "--population-size", "1",
+            "--mutation-rate", "0",
+            "--rotations", "4",
+            "--spacing", "0",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nested result written"));
+
+    let output = fs::read_to_string(tmp.path().join("nested.svg"))?;
+    let expected = fs::read_to_string("tests/fixtures/expected_smallbin.svg")?;
+    assert_eq!(output.trim(), expected.trim());
+    tmp.close()?;
+    Ok(())
+}

@@ -208,7 +208,21 @@ impl<'a> GeneticAlgorithm<'a> {
     }
 
     pub fn create_svg(&self, ind: &Individual) -> String {
-        let (_height, placement) = layout(ind, self.parts, self.bin_bounds, self.config);
+        // reuse the filtering logic from evaluation so that SVG output ignores
+        // parts that cannot fit into the bin
+        let mut placement_ids = Vec::new();
+        let mut rotation = Vec::new();
+        for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
+            let rotated = self.parts[idx].rotated(angle);
+            if let Some(b) = get_polygons_bounds(&rotated) {
+                if b.width <= self.bin_bounds.width && b.height <= self.bin_bounds.height {
+                    placement_ids.push(idx);
+                    rotation.push(angle);
+                }
+            }
+        }
+        let filtered = Individual { placement: placement_ids, rotation, fitness: 0.0 };
+        let (_height, placement) = layout(&filtered, self.parts, self.bin_bounds, self.config);
         let mut body = String::new();
         for p in &placement {
             let part = &self.parts[p.idx];
@@ -235,8 +249,59 @@ impl<'a> GeneticAlgorithm<'a> {
 }
 
 fn evaluate_static(ind: &Individual, parts: &[Part], bin_bounds: Bounds, config: GAConfig) -> f64 {
-    let (h, _) = layout(ind, parts, bin_bounds, config);
-    h
+    // filter out parts that cannot possibly fit inside the bin
+    let mut placement = Vec::new();
+    let mut rotation = Vec::new();
+    let mut unplaceable = 0usize;
+    for (&idx, &angle) in ind.placement.iter().zip(&ind.rotation) {
+        let part = &parts[idx];
+        let rotated = part.rotated(angle);
+        match get_polygons_bounds(&rotated) {
+            Some(b) if b.width <= bin_bounds.width && b.height <= bin_bounds.height => {
+                placement.push(idx);
+                rotation.push(angle);
+            }
+            _ => unplaceable += 1,
+        }
+    }
+
+    let filtered = Individual {
+        placement,
+        rotation,
+        fitness: 0.0,
+    };
+
+    let (height, placed) = layout(&filtered, parts, bin_bounds, config);
+    if !height.is_finite() {
+        return f64::INFINITY;
+    }
+
+    // compute width used in each bin
+    use std::collections::HashMap;
+    let mut bin_width: HashMap<usize, f64> = HashMap::new();
+    for p in &placed {
+        let part = &parts[p.idx];
+        if let Some(b) = get_polygons_bounds(&part.rotated(p.angle)) {
+            let bin_idx = (p.y / bin_bounds.height).floor() as usize;
+            let w = p.x + b.width;
+            bin_width
+                .entry(bin_idx)
+                .and_modify(|v| {
+                    if w > *v {
+                        *v = w;
+                    }
+                })
+                .or_insert(w);
+        }
+    }
+
+    let bin_area = bin_bounds.width * bin_bounds.height;
+    let mut fitness = bin_width.len() as f64;
+    for width in bin_width.values() {
+        fitness += width / bin_area;
+    }
+    fitness += 2.0 * unplaceable as f64;
+    fitness
 }
 
 fn layout(
