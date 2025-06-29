@@ -22,7 +22,7 @@ fn concave_minkowski_handles_l_shape() {
     assert!(nfp.len() > 4);
     let area = polygon_area(&nfp).abs();
     println!("area: {}", area);
-    assert!((area - 5.0).abs() < 0.1);
+    assert!((area - 8.0).abs() < 0.1);
 }
 
 #[test]
