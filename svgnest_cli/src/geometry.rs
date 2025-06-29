@@ -1,5 +1,5 @@
 use crate::svg_parser::{Point, Polygon};
-use geo::{Area, BoundingRect, LineString, Rotate, Translate, point};
+use geo::{Area, BoundingRect, LineString, Rotate, point};
 
 /// Bounding box of a polygon
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -128,7 +128,6 @@ pub fn get_polygons_bounds(polys: &[Polygon]) -> Option<Bounds> {
 }
 
 use geo::{prelude::*, LineString as GeoLineString, MultiPolygon, Polygon as GeoPolygon};
-use geo_types::Coord;
 use geo_clipper::{Clipper, EndType, JoinType};
 
 fn to_geo_polygon(points: &[Point]) -> GeoPolygon<f64> {
@@ -163,9 +162,12 @@ pub fn offset_polygon(points: &[Point], delta: f64) -> Vec<Vec<Point>> {
         .collect()
 }
 
-/// Compute a simple Minkowski difference using pairwise vertex subtraction.
-/// This implementation assumes convex polygons and returns the convex hull of
-/// the resulting point set.
+/// General Minkowski difference using the Clipper library.
+///
+/// This implementation mirrors the JavaScript version used by SVGnest and
+/// correctly handles concave polygons by constructing the Minkowski sum of `a`
+/// with the negated `b` polygon and unioning the intermediate quads via
+/// `geo_clipper::Clipper`.
 pub fn minkowski_difference_clip(a: &[Point], b: &[Point]) -> Vec<Point> {
     use std::cmp::Ordering;
 
@@ -173,38 +175,73 @@ pub fn minkowski_difference_clip(a: &[Point], b: &[Point]) -> Vec<Point> {
         return Vec::new();
     }
 
-    let a_poly = to_geo_polygon(a);
-    let b_poly = to_geo_polygon(b);
+    let la = a.len();
+    let lb = b.len();
 
-    // Invert B around the origin
-    let inv_b = b_poly.map_coords(|c| Coord { x: -c.x, y: -c.y });
-
-    // Translate inverted B by each vertex of A and union the results
-    let mut mp = MultiPolygon(vec![]);
-    for v in a_poly.exterior().points() {
-        let translated = inv_b.translate(v.x(), v.y());
-        mp = if mp.0.is_empty() {
-            MultiPolygon(vec![translated])
-        } else {
-            geo_clipper::Clipper::union(&mp, &translated, CLIPPER_SCALE)
-        };
+    // Precompute (-B) + A point matrices (Minkowski sum of A with inverted B)
+    let mut sum: Vec<Vec<Point>> = Vec::with_capacity(lb);
+    for pb in b {
+        let row: Vec<Point> = a
+            .iter()
+            .map(|pa| Point {
+                x: pa.x - pb.x,
+                y: pa.y - pb.y,
+            })
+            .collect();
+        sum.push(row);
     }
 
-    // Select the polygon with the largest area
-    let poly_opt = mp
-        .0
-        .into_iter()
-        .max_by(|p1, p2| {
-            p1.unsigned_area()
-                .partial_cmp(&p2.unsigned_area())
-                .unwrap_or(Ordering::Equal)
+    // Build quads from the point matrices
+    let mut quads: Vec<Vec<Point>> = Vec::new();
+    for i in 0..lb { // path is closed
+        for j in 0..la {
+            let mut poly = vec![
+                sum[i % lb][j % la],
+                sum[(i + 1) % lb][j % la],
+                sum[(i + 1) % lb][(j + 1) % la],
+                sum[i % lb][(j + 1) % la],
+            ];
+            if polygon_area(&poly) < 0.0 {
+                poly.reverse();
+            }
+            quads.push(poly);
+        }
+    }
+
+    // Union all quads using Clipper
+    let mut acc: Option<MultiPolygon<f64>> = None;
+    for quad in &quads {
+        let g = to_geo_polygon(quad);
+        acc = Some(match acc {
+            Some(mp) => Clipper::union(&mp, &g, CLIPPER_SCALE),
+            None => MultiPolygon(vec![g]),
         });
+    }
+
+    let mp = match acc {
+        Some(mp) => mp,
+        None => return Vec::new(),
+    };
+
+    // Select the polygon with the smallest (most negative) area
+    let poly_opt = mp.0.into_iter().min_by(|p1, p2| {
+        p1.signed_area()
+            .partial_cmp(&p2.signed_area())
+            .unwrap_or(Ordering::Equal)
+    });
 
     if let Some(poly) = poly_opt {
-        poly.exterior()
+        let mut pts: Vec<Point> = poly
+            .exterior()
             .points()
-            .map(|c| Point { x: c.x() + b[0].x, y: c.y() + b[0].y })
-            .collect()
+            .map(|c| Point { x: c.x(), y: c.y() })
+            .collect();
+        // Translate by the first vertex of B
+        for p in &mut pts {
+            p.x += b[0].x;
+            p.y += b[0].y;
+        }
+        pts
     } else {
         Vec::new()
     }
