@@ -217,6 +217,17 @@ pub fn polygons_intersect(a: &[Point], b: &[Point], ax: f64, ay: f64, bx: f64, b
     !Clipper::intersection(&pa, &pb, CLIPPER_SCALE).0.is_empty()
 }
 
+/// Returns true if polygon `b` translated by (bx,by) lies completely inside
+/// polygon `a` translated by (ax,ay).
+pub fn polygon_contains_polygon(a: &[Point], b: &[Point], ax: f64, ay: f64, bx: f64, by: f64) -> bool {
+    for p in b {
+        if !point_in_polygon(a, p.x + bx - ax, p.y + by - ay) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Returns true if point (x,y) lies inside the polygon using even-odd rule.
 pub fn point_in_polygon(poly: &[Point], x: f64, y: f64) -> bool {
     let mut inside = false;

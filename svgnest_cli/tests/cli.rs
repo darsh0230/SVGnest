@@ -258,3 +258,40 @@ fn cli_unplaceable_rotated_parts() -> Result<(), Box<dyn std::error::Error>> {
     tmp.close()?;
     Ok(())
 }
+
+#[test]
+fn cli_concave_overlap_shapes() -> Result<(), Box<dyn std::error::Error>> {
+    let bin = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/narrowbin.svg");
+    let c1 = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/concave1.svg");
+    let c2 = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/concave2.svg");
+    let tmp = TempDir::new()?;
+    Command::cargo_bin("svgnest_cli")?
+        .current_dir(&tmp)
+        .args([
+            "--inputs",
+            bin.to_str().unwrap(),
+            "--inputs",
+            c1.to_str().unwrap(),
+            "--inputs",
+            c2.to_str().unwrap(),
+            "--population-size",
+            "1",
+            "--mutation-rate",
+            "0",
+            "--rotations",
+            "0",
+            "--spacing",
+            "0",
+            "--explore-concave",
+        ])
+        .assert()
+        .success();
+    let output = fs::read_to_string(tmp.path().join("nested.svg"))?;
+    let expected = fs::read_to_string("tests/fixtures/expected_concave.svg")?;
+    assert_eq!(output.trim(), expected.trim());
+    tmp.close()?;
+    Ok(())
+}
