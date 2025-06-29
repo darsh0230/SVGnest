@@ -127,6 +127,65 @@ pub fn get_polygons_bounds(polys: &[Polygon]) -> Option<Bounds> {
     })
 }
 
+use geo_clipper::{Clipper, EndType, JoinType};
+use geo::{LineString as GeoLineString, Polygon as GeoPolygon};
+
+/// Offset a polygon by the given delta using geo-clipper.
+pub fn offset_polygon(points: &[Point], delta: f64) -> Vec<Vec<Point>> {
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    let coords: Vec<_> = points.iter().map(|p| (p.x, p.y)).collect();
+    let poly = GeoPolygon::new(GeoLineString::from(coords), vec![]);
+    let result = poly.offset(
+        delta,
+        JoinType::Miter(2.0),
+        EndType::ClosedPolygon,
+        CLIPPER_SCALE,
+    );
+    result
+        .into_iter()
+        .map(|p| {
+            p.exterior()
+                .points_iter()
+                .map(|c| Point { x: c.x(), y: c.y() })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Naive Minkowski difference of two polygons.
+/// This implementation approximates the result using bounding boxes and is not
+/// equivalent to the full algorithm.
+pub fn minkowski_difference(a: &[Point], b: &[Point]) -> Vec<Vec<Point>> {
+    let ab = match get_polygon_bounds(a) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let bb = match get_polygon_bounds(b) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let dx = ab.x - bb.x;
+    let dy = ab.y - bb.y;
+    let pts = vec![
+        Point { x: dx, y: dy },
+        Point {
+            x: dx + ab.width - bb.width,
+            y: dy,
+        },
+        Point {
+            x: dx + ab.width - bb.width,
+            y: dy + ab.height - bb.height,
+        },
+        Point {
+            x: dx,
+            y: dy + ab.height - bb.height,
+        },
+    ];
+    vec![pts]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
