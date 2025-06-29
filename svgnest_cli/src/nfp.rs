@@ -135,3 +135,45 @@ pub fn no_fit_polygon_general(
         vec![minkowski_difference_clip(container, part)]
     }
 }
+
+fn multipolygon_to_polygons(mp: geo_types::MultiPolygon<f64>) -> Vec<Vec<Point>> {
+    mp.0
+        .into_iter()
+        .map(|p| {
+            p.exterior()
+                .points()
+                .map(|c| Point { x: c.x(), y: c.y() })
+                .collect()
+        })
+        .collect()
+}
+
+fn polygons_to_multipolygon(polys: &[Vec<Point>]) -> geo_types::MultiPolygon<f64> {
+    let mut mp = geo_types::MultiPolygon(vec![]);
+    for poly in polys {
+        if poly.len() < 3 {
+            continue;
+        }
+        let g = to_geo_polygon(poly);
+        mp = if mp.0.is_empty() {
+            geo_types::MultiPolygon(vec![g])
+        } else {
+            Clipper::union(&mp, &g, CLIPPER_SCALE)
+        };
+    }
+    mp
+}
+
+/// Union a list of polygons into a single MultiPolygon using geo_clipper.
+pub fn union_polygons(polys: &[Vec<Point>]) -> Vec<Vec<Point>> {
+    let mp = polygons_to_multipolygon(polys);
+    multipolygon_to_polygons(mp)
+}
+
+/// Difference of subject minus clip polygons using geo_clipper.
+pub fn difference_polygons(subject: &[Vec<Point>], clip: &[Vec<Point>]) -> Vec<Vec<Point>> {
+    let subj_mp = polygons_to_multipolygon(subject);
+    let clip_mp = polygons_to_multipolygon(clip);
+    let diff = Clipper::difference(&subj_mp, &clip_mp, CLIPPER_SCALE);
+    multipolygon_to_polygons(diff)
+}
